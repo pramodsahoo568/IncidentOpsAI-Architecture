@@ -1,289 +1,366 @@
-# InsightOpsAI
-**Enterprise Knowledge and Operations Copilot**
+# IncidentOpsAI
 
-[![Python](https://img.shields.io/badge/Python-3.11-blue.svg)](https://www.python.org/)
+**Evidence-grounded railway incident validation and human-review workflow**
+
+[![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/API-FastAPI-009688.svg)](https://fastapi.tiangolo.com/)
-[![LangChain](https://img.shields.io/badge/AI-LangChain-orange.svg)](https://www.langchain.com/)
-[![LangGraph](https://img.shields.io/badge/Agents-LangGraph-purple.svg)](https://www.langchain.com/langgraph)
-[![PostgreSQL](https://img.shields.io/badge/Database-PostgreSQL%20%2B%20pgvector-336791.svg)](https://github.com/pgvector/pgvector)
-[![Redis](https://img.shields.io/badge/Memory-Redis-red.svg)](https://redis.io/)
-[![React](https://img.shields.io/badge/UI-React-61DAFB.svg)](https://react.dev/)
-[![Vite](https://img.shields.io/badge/Build-Vite-646CFF.svg)](https://vitejs.dev/)
+[![LangGraph](https://img.shields.io/badge/Orchestration-LangGraph-purple.svg)](https://www.langchain.com/langgraph)
+[![OpenAI](https://img.shields.io/badge/LLM-OpenAI-412991.svg)](https://platform.openai.com/)
+[![PostgreSQL](https://img.shields.io/badge/Vector_Store-PostgreSQL%20%2B%20PGVector-336791.svg)](https://github.com/pgvector/pgvector)
 
-InsightOpsAI is an enterprise knowledge and railway-operations copilot. The
-backend exposes a FastAPI service that classifies user intent, routes requests
-through a LangGraph agent workflow, retrieves governed knowledge from a
-PostgreSQL/PGVector RAG store, and generates grounded answers with OpenAI. The
-React UI provides the workspace experience for AI assistance, knowledge search,
-onboarding, operations tickets, analytics, and settings.
+IncidentOpsAI is a proof-of-concept API for validating railway CTC/Automatic
+Route Setting (ARS) incident reports against functional test-case evidence. A
+FastAPI endpoint accepts an incident, a LangGraph workflow triages it, and a
+RAG validation agent retrieves relevant ARS test cases from PGVector before
+classifying the report as a valid defect, expected behavior, or insufficient
+evidence.
 
-The project is designed for interview discussion around RAG architecture,
-agentic routing, RBAC-aware retrieval, full-stack integration, and operational
-AI use cases.
-
+Valid defects are converted into an evidence-backed Jira proposal and paused
+for a human engineer. The engineer can approve, modify, or reject the proposal.
+Approval currently creates a dry-run Jira ID; no external Jira system is
+connected.
 
 ## High-Level Architecture
 
-![InsightOpsAI Architecture Diagram](./Insightops_architecture_diagram.png)
+### IncidentOpsAI Architecture Diagram
+
+The architecture diagram presents the complete system context. API clients send
+incident reports to the FastAPI service, which delegates processing to the
+LangGraph orchestration layer. The agents use OpenAI chat and embedding models,
+retrieve authoritative ARS test-case evidence from PostgreSQL/PGVector, and
+expose paused proposals through the human-review API. Configuration and the
+Excel-to-PGVector ingestion path support these runtime components.
+
+![IncidentOpsAI architecture showing API clients, FastAPI, LangGraph agents, OpenAI services, the RAG pipeline, PGVector, and human review](./docs/IncidentOpsAI_Architecture_Diagram.png)
+
+*Figure 1: IncidentOpsAI system architecture and component interactions.*
+
+### Agentic AI Workflow
+
+The agent workflow diagram focuses on the internal control flow implemented by
+`incidentops_graph.py`. It follows an incident from LLM-based triage through
+RAG-backed requirement validation and conditional routing. Valid defects proceed
+to proposal generation and a LangGraph human-in-the-loop interrupt; an engineer
+can approve the proposal, request a revision and review it again, or reject it.
+Approved proposals currently end in dry-run Jira creation.
+
+![IncidentOpsAI Agentic AI workflow showing triage, RAG validation, conditional routing, human review, and Jira proposal creation](./docs/IncidentOpsAI_Agent_graph_workflow.png)
+
+*Figure 2: IncidentOpsAI LangGraph agent orchestration and human-in-the-loop workflow.*
+
+### Simplified Runtime Flow
+
+The Mermaid view below provides a compact, text-rendered summary of how the API,
+agents, OpenAI models, and PGVector knowledge base interact at runtime:
+
+```mermaid
+flowchart LR
+    Client[API client / UI] --> API[FastAPI app]
+    API --> Graph[LangGraph IncidentState workflow]
+    Graph --> Triage[Triage agent]
+    Triage --> Validate[Requirement validation agent]
+    Validate --> Embed[OpenAI query embedding]
+    Embed --> Vector[PGVector similarity search]
+    Vector --> KB[(ARS test-case collection)]
+    KB --> Validate
+    Validate --> Decision{Validation decision}
+    Decision -->|EXPECTED_BEHAVIOR| Designed[Close as designed]
+    Decision -->|INSUFFICIENT_EVIDENCE| Evidence[Request more evidence]
+    Decision -->|VALID_DEFECT| Duplicate[Duplicate-check hook]
+    Duplicate --> Proposal[Generate Jira proposal]
+    Proposal --> HITL[LangGraph interrupt + human review]
+    HITL -->|APPROVE| Jira[Dry-run Jira creation]
+    HITL -->|MODIFY| Revise[Revise proposal]
+    Revise --> HITL
+    HITL -->|REJECT| Cancel[Cancel incident]
+```
 
 ## Key Capabilities
 
-- Intent-routed AI assistant using LangGraph supervisor and specialist agents.
-- Knowledge assistant with hybrid retrieval: vector search + BM25 + reciprocal
-  rank fusion.
-- Tenant and access-level filtering before retrieval.
-- PostgreSQL + PGVector schema for documents, chunks, embeddings, messages, and
-  conversations.
-- Document-processing, chunking, embedding, and vector-store modules for RAG
-  ingestion.
-- React/Vite UI protected by Clerk authentication.
-- Workspace modules for dashboard, AI assistant, knowledge base, onboarding,
-  operations tickets, analytics, and settings.
+- Validated FastAPI request and response contracts for operational incidents.
+- LangGraph state machine with conditional routing and resumable human review.
+- Structured OpenAI outputs for triage, requirement validation, proposal
+  generation, and proposal revision.
+- ARS knowledge ingestion from Excel, preserving one complete test case per
+  vector document.
+- Semantic retrieval from PostgreSQL/PGVector using OpenAI embeddings.
+- Evidence-constrained validation with test-case and requirement traceability.
+- Non-blocking HITL flow: the report request returns when the graph interrupts,
+  and a later review request resumes the same graph thread.
 
 ## Tech Stack
 
 | Layer | Technology |
 | --- | --- |
-| Backend API | FastAPI, Uvicorn, Pydantic |
-| Agent orchestration | LangGraph, LangChain |
-| LLM and embeddings | OpenAI chat and embedding models |
-| Retrieval | PostgreSQL, PGVector, BM25, reciprocal rank fusion |
-| Data services | PostgreSQL, Redis via Docker Compose |
-| Frontend | React 19, Vite, React Router, Clerk |
-| Testing | Pytest, FastAPI TestClient |
+| API | FastAPI, Pydantic, Uvicorn |
+| Agent orchestration | LangGraph, in-memory `MemorySaver` |
+| LLM | LangChain OpenAI `ChatOpenAI` |
+| Embeddings | OpenAI `text-embedding-3-small` by default |
+| Knowledge store | PostgreSQL, PGVector, `langchain-postgres` |
+| Knowledge source | Excel workbook read with `openpyxl` |
 
-## Repository Layout
+## Active Repository Layout
+
+Only files used by the current API, orchestration, or ARS RAG path are shown.
 
 ```text
-Project-InsightOpsAI/
-  main.py                         # Uvicorn entry point
+Project-IncidentOpsAI/
+  README.md
+  requirements.txt
   app/
-    app.py                        # FastAPI app factory, CORS, health route
-    router/api_router.py          # API endpoints
-    agents/ai_chat_graph.py       # LangGraph supervisor and agent workflow
-    services/                     # Chat service and document service use cases
-    rag/                          # Processing, chunking, embeddings, retrieval
-    security/access_control.py    # Temporary RBAC/access context
-    schemas/                      # API request/response contracts
-    core/                         # Settings and logging
-  migrations/001_initial.sql      # PostgreSQL + PGVector schema
-  docker-compose.yml              # PostgreSQL/PGVector and Redis
-  tests/                          # API and RAG unit tests
+    app.py                         # FastAPI app, schemas, routes, response mapping
+    agents/
+      incidentops_graph.py         # LangGraph nodes, routing, HITL, service functions
+    core/
+      config.py                    # Environment-backed OpenAI/PostgreSQL settings
+    rag/
+      rag_pipeline.py              # Excel ingestion and PGVector retrieval
+      kb_docs/
+        Functionlity_Testcase.xlsx # Default ARS knowledge source
+  docs/
+    IncidentOpsAI_Architecture_Diagram.png
+    IncidentOpsAI_Agent_graph_workflow.png
+    incidentops_graph.mmd
 ```
 
-UI project analyzed:
+`main.py` is the original PyCharm sample and is not the server entry point. The
+generic files under `app/rag/` (document chunking, hybrid search, repositories,
+query understanding, and similar modules) are not imported by the active
+IncidentOps workflow and are intentionally excluded from this architecture.
 
-```text
-/home/ubuntu/REACT_UI_Developement/InsightOpsAI_UI/
-  src/
-    main.jsx                      # ClerkProvider and route definitions
-    App.jsx                       # Auth gate
-    layouts/WorkspaceLayout/      # Sidebar, topbar, workspace shell
-    routes/
-      DashboardPage/
-      AIAssistantPage/            # Calls backend /api/ai_chat
-      KnowledgeBasePage/
-      OnboardingPage/
-      OpsTicketsPage/
-      AnalyticsPage/
-      SettingsPage/
-    components/
-      Brand/
-      Icon/
-```
+## Code Flow
 
+### 1. API request and validation (`app/app.py`)
 
+`POST /api/incidents/report` validates four fields with Pydantic:
 
-```mermaid
-flowchart LR
-    User[User] --> UI[React InsightOpsAI UI]
-    UI -->|POST /api/ai_chat| API[FastAPI Backend]
-    API --> Service[ChatService]
-    Service --> Graph[LangGraph AI Chat Graph]
-    Graph --> Supervisor[Supervisor Agent]
-    Supervisor -->|knowledge_query| Knowledge[Knowledge Assistant]
-    Supervisor -->|troubleshooting| Troubleshooting[Troubleshooting Agent]
-    Supervisor -->|ticket_generation| Ticket[Ticket Generation Agent]
-    Knowledge --> Access[Access Control Context]
-    Knowledge --> Retriever[Document Retrieval Pipeline]
-    Retriever --> Embeddings[OpenAI Query Embedding]
-    Retriever --> Hybrid[Hybrid Search]
-    Hybrid --> Vector[PGVector Search]
-    Hybrid --> BM25[BM25 Keyword Search]
-    Vector --> DB[(PostgreSQL + PGVector)]
-    BM25 --> DB
-    Hybrid --> RRF[Reciprocal Rank Fusion]
-    RRF --> Knowledge
-    Knowledge --> LLM[OpenAI Chat Model]
-    LLM --> API
-    API --> UI
-```
+- `title`: 5–200 characters
+- `description`: 20–5000 characters
+- `location`: 2–200 characters
+- `priority`: `Low`, `Medium`, `High`, or `Critical`
 
-## Chat Request Flow
+The handler converts the priority enum to a string and calls `run_flow()`. It
+then maps graph state fields such as the validation decision, matched test case,
+confidence, stage, and status into `IncidentReportResponse`.
+
+### 2. Workflow initialization (`run_flow`)
+
+`run_flow()`:
+
+1. Generates an `INC-XXXXXXXX` identifier unless one was supplied.
+2. Adds a UTC creation timestamp and initializes `IncidentState`.
+3. uses the incident ID as the LangGraph `thread_id`.
+4. Invokes the compiled graph asynchronously.
+5. If execution pauses at HITL, normalizes the result to
+   `pending_human_review` and adds a summary to the in-memory review queue.
+
+### 3. Triage agent
+
+The first node sends the canonical incident text to the configured OpenAI chat
+model and requests a structured `TriageResult`. It extracts only identifiers
+explicitly present in the report (`station_id`, `track_id`, and `train_id`),
+assigns severity, and creates a factual one-sentence summary.
+
+### 4. RAG requirement validation
+
+The validation node builds a retrieval query from the triage summary (falling
+back to the original incident text) and runs the synchronous PGVector retrieval
+in a worker thread so the async workflow is not blocked.
 
 ```mermaid
 sequenceDiagram
-    participant U as React UI
-    participant A as FastAPI /api/ai_chat
-    participant S as ChatService
-    participant G as LangGraph
-    participant R as Retrieval Pipeline
-    participant D as PostgreSQL/PGVector
-    participant L as OpenAI
+    participant G as Validation agent
+    participant R as rag_pipeline
+    participant E as OpenAI embeddings
+    participant P as PGVector
+    participant L as OpenAI chat model
 
-    U->>A: message, user_id, session_id
-    A->>S: validate ChatRequest
-    S->>G: graph input with secure metadata
-    G->>G: supervisor_agent classifies intent
-    alt Knowledge query
-        G->>R: retrieve_results(query, access metadata)
-        R->>L: create query embedding
-        R->>D: vector search with tenant/access filters
-        R->>D: BM25 keyword search with same filters
-        R->>R: merge results with RRF
-        R-->>G: top retrieved chunks and metadata
-        G->>L: answer with enterprise context
-    else Troubleshooting
-        G->>G: return troubleshooting placeholder response
-    else Ticket generation
-        G->>G: return ticket draft placeholder response
+    G->>R: retrieve_requirements(query, k=4)
+    R->>E: embed retrieval query
+    E-->>R: query vector
+    R->>P: similarity_search_with_score
+    P-->>R: top four test-case documents
+    R-->>G: content, metadata, score
+    alt no evidence
+        G-->>G: INSUFFICIENT_EVIDENCE, confidence 0
+    else evidence found
+        G->>L: incident + retrieved evidence + validation rules
+        L-->>G: structured ValidationResult
     end
-    G-->>S: answer, intent, sources, suggested actions
-    S-->>A: ChatResponse
-    A-->>U: JSON response
 ```
 
-## RAG Ingestion Design
+The LLM must return one of:
 
-The codebase contains the ingestion building blocks even though the current
-`/api/upload` route only returns file metadata.
+| Decision | Meaning | Next step |
+| --- | --- | --- |
+| `VALID_DEFECT` | Observed behavior contradicts explicit expected behavior. | Duplicate check, then proposal generation. |
+| `EXPECTED_BEHAVIOR` | Observed behavior matches the retrieved requirement. | Close as designed. |
+| `INSUFFICIENT_EVIDENCE` | The report or retrieved test cases cannot prove either outcome. | Stop at `needs_more_evidence`. |
+
+The prompt instructs the model to use only retrieved evidence, not invent
+missing facts, and copy the matched test-case ID and requirement section from
+that evidence.
+
+### 5. Defect proposal and HITL
+
+For a valid defect, the duplicate-check node currently continues as
+non-duplicate because no open-ticket repository is connected. The proposal
+agent creates structured Jira-ready content without speculating about root
+cause. RCA remains marked as pending engineering investigation.
+
+`hitl_approval_node()` calls LangGraph `interrupt()`. The HTTP report request
+returns at this point; it does not wait for an engineer. Pending review endpoints
+read from a lightweight in-memory queue.
+
+### 6. Workflow resume
+
+`POST /api/incidents/{incident_id}/review` validates the review and calls
+`resume_flow()`, which resumes the exact LangGraph thread with a `Command`:
+
+- `APPROVE` routes to the Jira tool node and produces `JIRA-DRYRUN-XXXXXX`.
+- `MODIFY` requires feedback, revises and versions the proposal, then interrupts
+  again for another review.
+- `REJECT` terminates the workflow with status `rejected`.
+
+Completed or rejected incidents are removed from the pending-review queue.
+
+## RAG Ingestion Flow
+
+Ingestion is an offline/deployment action, not part of incident submission.
 
 ```mermaid
-flowchart TD
-    Files[PDF/DOCX/PPTX/TXT and other source files]
-    Files --> Processor[DocumentProcessor]
-    Processor --> Chunker[DocumentChunker / SemanticChunker]
-    Chunker --> Embedder[EmbeddingGenerator / OpenAIEmbeddings]
-    Embedder --> Store[VectorStoreManager / PGVector]
-    Store --> Tables[(documents, document_chunks, chunk embeddings)]
-    Tables --> Retrieval[DocumentRetrievalPipeline]
+flowchart LR
+    XLSX[Functionlity_Testcase.xlsx] --> Sheets[Read workbook sheets]
+    Sheets --> Header[Detect likely header row]
+    Header --> Records[Normalize each populated row]
+    Records --> Docs[One Document per logical test case]
+    Docs --> Embeddings[OpenAI embeddings]
+    Embeddings --> Store[(PGVector collection)]
 ```
 
-Important RAG modules:
+Each document keeps the scenario, preconditions, execution steps, and expected
+behavior together. Metadata includes the source workbook, sheet, Excel row,
+test-case ID, requirement section, and document type. This is deliberate: generic
+character chunking could separate a condition from its expected result.
 
-| Module | Responsibility |
-| --- | --- |
-| `app/rag/document_processing.py` | Loads and extracts document text and metadata. |
-| `app/rag/document_chunking.py` | Splits extracted text into overlapping chunks. |
-| `app/rag/embedding_generator.py` | Generates OpenAI embeddings and validates vector dimensions. |
-| `app/rag/vector_store.py` | PGVector storage adapter boundary. |
-| `app/rag/retrieval_repository.py` | SQL vector search and BM25 retrieval. |
-| `app/rag/hybrid_search.py` | Combines vector and keyword results using RRF. |
-| `app/security/access_control.py` | Supplies tenant, access level, and allowed category context. |
+The collection defaults to `incidentops_kb_docs` and can be overridden with
+`INCIDENTOPS_ARS_COLLECTION`.
 
 ## API Endpoints
 
-Base URL for local development:
+Local base URL: `http://127.0.0.1:8000`
 
-```text
-http://127.0.0.1:8000
-```
-
-| Method | Endpoint | Description |
+| Method | Endpoint | Purpose |
 | --- | --- | --- |
 | `GET` | `/health` | Service health check. |
-| `POST` | `/api/ai_chat` | Main AI assistant endpoint. Routes the message through the LangGraph workflow. |
-| `POST` | `/api/upload` | Accepts a multipart file and returns filename, content type, size, and success message. |
+| `POST` | `/api/incidents/report` | Start incident triage and validation. |
+| `GET` | `/api/incidents/pending-reviews` | List incidents awaiting an engineer. |
+| `GET` | `/api/incidents/pending-reviews/{incident_id}` | Get one review record. |
+| `POST` | `/api/incidents/{incident_id}/review` | Approve, modify, or reject a paused proposal. |
 
-### `POST /api/ai_chat`
+Interactive OpenAPI documentation is available at `/docs` after startup.
 
-Request:
+### Report an incident
 
-```json
-{
-  "user_id": "user@example.com",
-  "session_id": "sess-123",
-  "message": "What is the procedure for a signal failure?",
-  "attachments": [],
-  "metadata": {}
-}
+```bash
+curl -X POST http://127.0.0.1:8000/api/incidents/report \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title": "Automatic route setting continued without Train ID",
+    "description": "Train 1001 occupied the target control track. No Train ID was present, but automatic route setting continued and no alarm was generated.",
+    "location": "Station A",
+    "priority": "High"
+  }'
 ```
 
-Response:
+For a validated defect, the response has `status: "pending_human_review"` and
+contains the matched test case, requirement section, confidence, and current
+stage. Expected behavior and insufficient evidence return terminal statuses
+immediately.
 
-```json
-{
-  "session_id": "sess-123",
-  "intent": "knowledge_query",
-  "answer": "Generated answer from the selected agent.",
-  "agent_name": "knowledge_assistant_agent",
-  "sources": [
-    {
-      "title": "Signal Failure Response Procedure",
-      "document_id": null,
-      "page": 4,
-      "url": null
-    }
-  ],
-  "suggested_actions": [
-    "Ask a follow-up question",
-    "Ask to summarize a document"
-  ]
-}
+### Review a proposal
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/incidents/INC-12345678/review \
+  -H "Content-Type: application/json" \
+  -d '{"decision": "APPROVE", "feedback": "Reviewed by signalling engineer"}'
 ```
 
-Intent routing currently uses keyword-based logic:
+To modify a proposal, use `"decision": "MODIFY"` and provide non-empty
+`feedback`. `REJECT` ends the incident without creating a dry-run Jira ID.
 
-| Intent | Trigger examples | Agent |
-| --- | --- | --- |
-| `knowledge_query` | General procedure, policy, HR, CTC, TMS, or technical questions | `knowledge_assistant_agent` |
-| `troubleshooting` | `log`, `error`, `exception`, `alarm`, `failure`, `root cause`, attachments | `troubleshooting_agent` |
-| `ticket_generation` | `ticket`, `jira`, `incident`, `raise issue`, `create issue` | `ticket_generation_agent` |
+## Setup and Run
 
-### `POST /api/upload`
+### Prerequisites
 
-Request type: `multipart/form-data`
+- Python 3.10 or newer
+- A PostgreSQL instance with the PGVector extension
+- An OpenAI API key
+- The ARS workbook at `app/rag/kb_docs/Functionlity_Testcase.xlsx` (or a custom
+  path passed to ingestion)
 
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `file` | File | Yes | File to upload. |
+### 1. Install dependencies
 
-Response:
-
-```json
-{
-  "filename": "manual.pdf",
-  "content_type": "application/pdf",
-  "size": 12345,
-  "message": "File uploaded successfully"
-}
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
 ```
 
-## Frontend Flow
+### 2. Configure environment variables
 
-```mermaid
-flowchart TD
-    Browser[Browser] --> Clerk[Clerk Auth]
-    Clerk -->|signed out| Landing[Auth Landing Page]
-    Clerk -->|signed in| Shell[Workspace Layout]
-    Shell --> Dashboard[Dashboard]
-    Shell --> Assistant[AI Assistant]
-    Shell --> KB[Knowledge Base]
-    Shell --> Onboarding[Employee Onboarding]
-    Shell --> Tickets[Ops Tickets]
-    Shell --> Analytics[Analytics]
-    Shell --> Settings[Settings]
-    Assistant -->|fetch| Backend[http://127.0.0.1:8000/api/ai_chat]
+Create `.env` in the project root:
+
+```dotenv
+OPENAI_API_KEY=your-openai-api-key
+OPENAI_MODEL=gpt-4o-mini
+TEXT_EMBEDDING_MODEL=text-embedding-3-small
+
+# SQLAlchemy/LangChain PostgreSQL URL
+PGVECTOR_CONNECTION=postgresql+psycopg://user:password@localhost:5432/incidentops
+
+# Direct psycopg URL; required by the current Settings model
+POSTGRES_CONNECTION=postgresql://user:password@localhost:5432/incidentops
+
+INCIDENTOPS_ARS_COLLECTION=incidentops_kb_docs
 ```
 
-Current UI behavior:
+Although `POSTGRES_CONNECTION` is not used by the active RAG path, it is a
+required configuration field when `app.core.config.Settings` is constructed.
 
-- `App.jsx` gates the workspace behind Clerk authentication.
-- `main.jsx` defines browser routes and redirects `/` to `/dashboard`.
-- `WorkspaceLayout` provides the sidebar, topbar, user menu, navigation, and
-  content outlet.
-- `AIAssistantPage` stores a browser session ID in `sessionStorage` and calls
-  `POST http://127.0.0.1:8000/api/ai_chat`.
-- `KnowledgeBasePage`, `OpsTicketsPage`, `OnboardingPage`, and `AnalyticsPage`
-  currently use local/mock UI state and are ready to be connected to backend
-  APIs.
+### 3. Ingest the ARS knowledge base
+
+Run once initially, and again when the workbook changes:
+
+```bash
+python -m app.rag.rag_pipeline --ingest --recreate
+```
+
+Omit `--recreate` to append documents. Optional flags are `--xlsx` for another
+workbook and `--collection` for another PGVector collection.
+
+### 4. Start the API
+
+```bash
+uvicorn app.app:app --reload --host 0.0.0.0 --port 8000
+```
+
+## Current POC Boundaries
+
+- `MemorySaver` checkpoints and the pending-review dictionary are in memory.
+  They are lost on restart and are not shared across multiple API workers.
+- Duplicate detection is a safe placeholder that always reports
+  `is_duplicate = false`; no Jira/open-incident index is queried.
+- Jira integration is a dry run. Approval generates an identifier but performs
+  no external write.
+- Root-cause analysis is deliberately human-led and is not inferred by the LLM.
+- Retrieval is dense PGVector similarity search only. The disconnected generic
+  hybrid/BM25 modules are not part of this runtime flow.
+- The API has CORS configuration but no authentication or authorization layer.
+- The repository currently contains no automated test suite for this workflow.
+
+For production use, replace in-memory persistence with a durable LangGraph
+checkpointer and review store, connect an incident/ticket repository for
+duplicate search, add authenticated reviewer access, integrate Jira, and add
+unit/integration tests around every routing branch.
+
