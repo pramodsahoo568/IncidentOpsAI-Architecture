@@ -99,34 +99,6 @@ flowchart LR
 | Knowledge store | PostgreSQL, PGVector, `langchain-postgres` |
 | Knowledge source | Excel workbook read with `openpyxl` |
 
-## Active Repository Layout
-
-Only files used by the current API, orchestration, or ARS RAG path are shown.
-
-```text
-Project-IncidentOpsAI/
-  README.md
-  requirements.txt
-  app/
-    app.py                         # FastAPI app, schemas, routes, response mapping
-    agents/
-      incidentops_graph.py         # LangGraph nodes, routing, HITL, service functions
-    core/
-      config.py                    # Environment-backed OpenAI/PostgreSQL settings
-    rag/
-      rag_pipeline.py              # Excel ingestion and PGVector retrieval
-      kb_docs/
-        Functionlity_Testcase.xlsx # Default ARS knowledge source
-  docs/
-    IncidentOpsAI_Architecture_Diagram.png
-    IncidentOpsAI_Agent_graph_workflow.png
-    incidentops_graph.mmd
-```
-
-`main.py` is the original PyCharm sample and is not the server entry point. The
-generic files under `app/rag/` (document chunking, hybrid search, repositories,
-query understanding, and similar modules) are not imported by the active
-IncidentOps workflow and are intentionally excluded from this architecture.
 
 ## Code Flow
 
@@ -305,24 +277,6 @@ To modify a proposal, use `"decision": "MODIFY"` and provide non-empty
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-```
-
-### 2. Configure environment variables
-
-Create `.env` in the project root:
-
-```dotenv
-OPENAI_API_KEY=your-openai-api-key
-OPENAI_MODEL=gpt-4o-mini
-TEXT_EMBEDDING_MODEL=text-embedding-3-small
-
-# SQLAlchemy/LangChain PostgreSQL URL
-PGVECTOR_CONNECTION=postgresql+psycopg://user:password@localhost:5432/incidentops
-
-# Direct psycopg URL; required by the current Settings model
-POSTGRES_CONNECTION=postgresql://user:password@localhost:5432/incidentops
-
-INCIDENTOPS_ARS_COLLECTION=incidentops_kb_docs
 ```
 
 Although `POSTGRES_CONNECTION` is not used by the active RAG path, it is a
